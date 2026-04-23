@@ -13,12 +13,11 @@ import (
 )
 
 // MarkAll reads /proc/self/maps and calls madvise(MADV_HUGEPAGE) on every
-// region that is readable and has a non-zero length. It skips regions that are
-// not readable (permission "-") to avoid EINVAL from the kernel.
+// region that is read-write and has a length above minLength.
 //
 // Returns the number of regions advised, and the first non-fatal error
 // encountered (regions that fail are silently skipped).
-func MarkAll() (int, error) {
+func MarkAll(minLength int) (int, error) {
 	f, err := os.Open("/proc/self/maps")
 	if err != nil {
 		return 0, err
@@ -32,17 +31,17 @@ func MarkAll() (int, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Format: address perms offset dev inode pathname
-		// address: 7f1234560000-7f1234580000
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
 		}
 		perms := fields[1]
-		// Skip non-readable regions; madvise on them returns EINVAL.
-		if len(perms) < 1 || perms[0] == '-' {
+		// Only read-write regions.
+		if !strings.HasPrefix(perms, "rw") {
 			continue
 		}
 
+		// Format of address: 7f1234560000-7f1234580000
 		startHex, endHex, ok := strings.Cut(fields[0], "-")
 		if !ok {
 			continue
@@ -55,7 +54,7 @@ func MarkAll() (int, error) {
 		if err != nil {
 			continue
 		}
-		if end < start {
+		if end < start || end-start < uint64(minLength) {
 			continue
 		}
 		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(end-start), syscall.MADV_HUGEPAGE)
