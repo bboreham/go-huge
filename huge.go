@@ -62,7 +62,7 @@ func MarkAll(minLength int) (int, error) {
 	var firstErr error
 	count := 0
 
-	for _, r := range regions {
+	for i, r := range regions {
 		if !r.rw {
 			continue
 		}
@@ -70,7 +70,16 @@ func MarkAll(minLength int) (int, error) {
 			continue
 		}
 		end := r.end
+		// Speculatively madvise more, but not past the start of the next region.
+		end += (end - r.start) + 16*1024*1024
+		if i+1 < len(regions) {
+			end = min(end, regions[i+1].start)
+		}
 		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(r.start), uintptr(end-r.start), syscall.MADV_HUGEPAGE)
+		if errno == 12 { // Speculative attempt failed; try again without the extra length.
+			end = r.end
+			_, _, errno = syscall.Syscall(syscall.SYS_MADVISE, uintptr(r.start), uintptr(end-r.start), syscall.MADV_HUGEPAGE)
+		}
 		if errno != 0 {
 			if firstErr == nil {
 				firstErr = errno
