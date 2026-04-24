@@ -9,7 +9,7 @@ import (
 )
 
 func TestMarkAll(t *testing.T) {
-	count, err := huge.MarkAll()
+	count, err := huge.MarkAll(0)
 	if err != nil {
 		t.Logf("first non-fatal error: %v", err)
 	}
