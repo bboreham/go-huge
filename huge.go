@@ -68,8 +68,8 @@ func MarkAll(minLength int) (int, error) {
 			continue
 		}
 		end := r.end
-		// Speculatively madvise a bit more, but not past the start of the next region.
-		end += 256 * 1024 * 1024
+		// Speculatively madvise more, but not past the start of the next region.
+		end += (end - r.start) + 16*1024*1024
 		if i+1 < len(regions) {
 			end = min(end, regions[i+1].start)
 		}
