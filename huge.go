@@ -12,6 +12,8 @@ import (
 	"syscall"
 )
 
+const _MADV_COLLAPSE = 0x19
+
 // MarkAll reads /proc/self/maps and calls madvise(MADV_HUGEPAGE) on every
 // region that is read-write and has a length above minLength.
 //
@@ -57,7 +59,7 @@ func MarkAll(minLength int) (int, error) {
 		if end < start || end-start < uint64(minLength) {
 			continue
 		}
-		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(end-start), syscall.MADV_HUGEPAGE)
+		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(end-start), _MADV_COLLAPSE)
 		if errno != 0 {
 			if firstErr == nil {
 				firstErr = errno
