@@ -24,9 +24,13 @@ func MarkAll(minLength int) (int, error) {
 	}
 	defer f.Close()
 
-	var firstErr error
-	count := 0
+	// Read /proc/self/maps into a slice of mapRegion structs.
+	type mapRegion struct {
+		start, end uint64
+		rw         bool
+	}
 
+	var regions []mapRegion
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -35,12 +39,6 @@ func MarkAll(minLength int) (int, error) {
 		if len(fields) < 2 {
 			continue
 		}
-		perms := fields[1]
-		// Only read-write regions.
-		if !strings.HasPrefix(perms, "rw") {
-			continue
-		}
-
 		// Format of address: 7f1234560000-7f1234580000
 		startHex, endHex, ok := strings.Cut(fields[0], "-")
 		if !ok {
@@ -54,10 +52,25 @@ func MarkAll(minLength int) (int, error) {
 		if err != nil {
 			continue
 		}
-		if end < start || end-start < uint64(minLength) {
+		regions = append(regions, mapRegion{start: start, end: end, rw: strings.HasPrefix(fields[1], "rw")})
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	// Now iterate the regions and call madvise(MADV_HUGEPAGE) on all read-write regions.
+	var firstErr error
+	count := 0
+
+	for _, r := range regions {
+		if !r.rw {
 			continue
 		}
-		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(end-start), syscall.MADV_HUGEPAGE)
+		if r.end < r.start || r.end-r.start < uint64(minLength) {
+			continue
+		}
+		end := r.end
+		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(r.start), uintptr(end-r.start), syscall.MADV_HUGEPAGE)
 		if errno != 0 {
 			if firstErr == nil {
 				firstErr = errno
@@ -65,9 +78,6 @@ func MarkAll(minLength int) (int, error) {
 		} else {
 			count++
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return count, err
 	}
 	return count, firstErr
 }
