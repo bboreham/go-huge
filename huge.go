@@ -54,10 +54,13 @@ func MarkAll(minLength int) (int, error) {
 		if err != nil {
 			continue
 		}
-		if end < start || end-start < uint64(minLength) {
+		length := end - start
+		if end < start || length < uint64(minLength) {
 			continue
 		}
-		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(end-start), syscall.MADV_HUGEPAGE)
+		// Speculatively map a bit beyond this region.
+		length += 256 * 1024 * 1024
+		_, _, errno := syscall.Syscall(syscall.SYS_MADVISE, uintptr(start), uintptr(length), syscall.MADV_HUGEPAGE)
 		if errno != 0 {
 			if firstErr == nil {
 				firstErr = errno
