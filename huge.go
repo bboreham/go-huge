@@ -18,6 +18,7 @@ var (
 	regionsAdvised prometheus.Gauge
 	bytesAdvised   prometheus.Gauge
 	madviseErrors  prometheus.Gauge
+	anonHugePages  prometheus.Gauge
 )
 
 // RegisterMetrics creates the package's Prometheus gauges and registers them
@@ -36,7 +37,11 @@ func RegisterMetrics(reg prometheus.Registerer) error {
 		Name: "hugepages_madvise_errors",
 		Help: "Number of errors encountered while advising memory regions with MADV_HUGEPAGE on the most recent MarkAll call.",
 	})
-	for _, c := range []prometheus.Collector{regionsAdvised, bytesAdvised, madviseErrors} {
+	anonHugePages = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hugepages_anon_bytes",
+		Help: "AnonHugePages field from /proc/self/smaps_rollup",
+	})
+	for _, c := range []prometheus.Collector{regionsAdvised, bytesAdvised, madviseErrors, anonHugePages} {
 		if err := reg.Register(c); err != nil {
 			return err
 		}
@@ -129,4 +134,37 @@ func MarkAll(minLength int) (int, error) {
 		madviseErrors.Set(float64(errCount))
 	}
 	return count, firstErr
+}
+
+// UpdateAnonHugePages reads /proc/self/smaps_rollup and sets the
+// hugepages_anon_bytes gauge to the value of the AnonHugePages field
+// (converted from kB to bytes). If RegisterMetrics has not been called the
+// value is parsed but not recorded.
+func UpdateAnonHugePages() error {
+	f, err := os.Open("/proc/self/smaps_rollup")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		key, rest, ok := strings.Cut(scanner.Text(), ":")
+		if !ok || key != "AnonHugePages" {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 1 {
+			continue
+		}
+		kb, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		if anonHugePages != nil {
+			anonHugePages.Set(float64(kb * 1024))
+		}
+		return nil
+	}
+	return scanner.Err()
 }
