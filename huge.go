@@ -26,16 +26,16 @@ var (
 // desired; if not called, MarkAll runs without recording metrics.
 func RegisterMetrics(reg prometheus.Registerer) error {
 	regionsAdvised = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "hugepages_regions_advised",
-		Help: "Number of memory regions successfully advised with MADV_HUGEPAGE on the most recent MarkAll call.",
+		Name: "hugepages_madvise_regions",
+		Help: "Number of memory regions successfully advised with MADV_HUGEPAGE",
 	})
 	bytesAdvised = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "hugepages_bytes_advised",
-		Help: "Total size in bytes of memory regions successfully advised with MADV_HUGEPAGE on the most recent MarkAll call.",
+		Name: "hugepages_madvise_bytes",
+		Help: "Total size in bytes of memory regions successfully advised with MADV_HUGEPAGE",
 	})
 	madviseErrors = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hugepages_madvise_errors",
-		Help: "Number of errors encountered while advising memory regions with MADV_HUGEPAGE on the most recent MarkAll call.",
+		Help: "Number of errors encountered while advising memory regions with MADV_HUGEPAGE",
 	})
 	anonHugePages = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hugepages_anon_bytes",
