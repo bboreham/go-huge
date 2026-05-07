@@ -6,6 +6,7 @@ package huge
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -136,11 +137,15 @@ func MarkAll(minLength int) (int, error) {
 	return count, firstErr
 }
 
-// UpdateAnonHugePages reads /proc/self/smaps_rollup and sets the
-// hugepages_anon_bytes gauge to the value of the AnonHugePages field
-// (converted from kB to bytes). If RegisterMetrics has not been called the
-// value is parsed but not recorded.
-func UpdateAnonHugePages() error {
+// UpdateExtraMetrics updates all extra metrics managed by this package.
+// If RegisterMetrics has not been called an error is returned.
+// Currently there is just one metric: hugepages_anon_bytes,
+// read from the AnonHugePages field in /proc/self/smaps_rollup.
+func UpdateExtraMetrics() error {
+	if anonHugePages == nil {
+		return fmt.Errorf("Metrics not registered")
+	}
+
 	f, err := os.Open("/proc/self/smaps_rollup")
 	if err != nil {
 		return err
@@ -161,9 +166,7 @@ func UpdateAnonHugePages() error {
 		if err != nil {
 			return err
 		}
-		if anonHugePages != nil {
-			anonHugePages.Set(float64(kb * 1024))
-		}
+		anonHugePages.Set(float64(kb * 1024))
 		return nil
 	}
 	return scanner.Err()
