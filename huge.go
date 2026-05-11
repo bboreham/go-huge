@@ -6,11 +6,49 @@ package huge
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+var (
+	regionsAdvised prometheus.Gauge
+	bytesAdvised   prometheus.Gauge
+	madviseErrors  prometheus.Gauge
+	anonHugePages  prometheus.Gauge
+)
+
+// RegisterMetrics creates the package's Prometheus gauges and registers them
+// with the given Registerer. It must be called before MarkAll if metrics are
+// desired; if not called, MarkAll runs without recording metrics.
+func RegisterMetrics(reg prometheus.Registerer) error {
+	regionsAdvised = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hugepages_madvise_regions",
+		Help: "Number of memory regions successfully advised with MADV_HUGEPAGE",
+	})
+	bytesAdvised = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hugepages_madvise_bytes",
+		Help: "Total size in bytes of memory regions successfully advised with MADV_HUGEPAGE",
+	})
+	madviseErrors = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hugepages_madvise_errors",
+		Help: "Number of errors encountered while advising memory regions with MADV_HUGEPAGE",
+	})
+	anonHugePages = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hugepages_anon_bytes",
+		Help: "AnonHugePages field from /proc/self/smaps_rollup",
+	})
+	for _, c := range []prometheus.Collector{regionsAdvised, bytesAdvised, madviseErrors, anonHugePages} {
+		if err := reg.Register(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // MarkAll reads /proc/self/maps and calls madvise(MADV_HUGEPAGE) on every
 // region that is read-write and has a length above minLength.
@@ -60,7 +98,8 @@ func MarkAll(minLength int) (int, error) {
 
 	// Now iterate the regions and call madvise(MADV_HUGEPAGE) on all read-write regions.
 	var firstErr error
-	count := 0
+	var count, errCount int
+	var bytes uint64
 
 	for i, r := range regions {
 		if !r.rw {
@@ -81,12 +120,54 @@ func MarkAll(minLength int) (int, error) {
 			_, _, errno = syscall.Syscall(syscall.SYS_MADVISE, uintptr(r.start), uintptr(end-r.start), syscall.MADV_HUGEPAGE)
 		}
 		if errno != 0 {
+			errCount++
 			if firstErr == nil {
 				firstErr = errno
 			}
 		} else {
 			count++
+			bytes += end - r.start
 		}
 	}
+	if regionsAdvised != nil {
+		regionsAdvised.Set(float64(count))
+		bytesAdvised.Set(float64(bytes))
+		madviseErrors.Set(float64(errCount))
+	}
 	return count, firstErr
+}
+
+// UpdateExtraMetrics updates all extra metrics managed by this package.
+// If RegisterMetrics has not been called an error is returned.
+// Currently there is just one metric: hugepages_anon_bytes,
+// read from the AnonHugePages field in /proc/self/smaps_rollup.
+func UpdateExtraMetrics() error {
+	if anonHugePages == nil {
+		return fmt.Errorf("Metrics not registered")
+	}
+
+	f, err := os.Open("/proc/self/smaps_rollup")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		key, rest, ok := strings.Cut(scanner.Text(), ":")
+		if !ok || key != "AnonHugePages" {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 1 {
+			continue
+		}
+		kb, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		anonHugePages.Set(float64(kb * 1024))
+		return nil
+	}
+	return scanner.Err()
 }
